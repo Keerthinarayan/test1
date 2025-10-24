@@ -1,37 +1,23 @@
 /*
-  # Create Transactions and Payments Schema
+  # Create Transactions and Payments Schema (Idempotent)
 
-  1. New Tables
-    - `transactions`
-      - `id` (uuid, primary key)
-      - `user_id` (uuid, references auth.users)
-      - `type` (text: 'expense', 'loan', 'subscription')
-      - `category` (text)
-      - `amount` (numeric)
-      - `description` (text)
-      - `status` (text: 'pending', 'completed', 'failed')
-      - `payment_method` (text)
-      - `stripe_payment_id` (text, nullable)
-      - `created_at` (timestamptz)
-      - `updated_at` (timestamptz)
+  1. Tables
+    - transactions
+    - pending_payments
 
-    - `pending_payments`
-      - `id` (uuid, primary key)
-      - `user_id` (uuid, references auth.users)
-      - `type` (text: 'expense', 'loan', 'subscription')
-      - `name` (text)
-      - `amount` (numeric)
-      - `due_date` (date, nullable)
-      - `recurrence` (text: 'none', 'monthly', 'yearly', nullable)
-      - `is_paid` (boolean)
-      - `created_at` (timestamptz)
+  2. Row Level Security (RLS)
+    - Enabled for both tables
 
-  2. Security
-    - Enable RLS on all tables
-    - Add policies for authenticated users to manage their own data
+  3. Policies
+    - Authenticated users can manage only their own data
+
+  4. Indexes
+    - Added for user_id, created_at, and due_date
 */
 
+-- ========================================
 -- Create transactions table
+-- ========================================
 CREATE TABLE IF NOT EXISTS transactions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
@@ -46,7 +32,9 @@ CREATE TABLE IF NOT EXISTS transactions (
   updated_at timestamptz DEFAULT now()
 );
 
+-- ========================================
 -- Create pending_payments table
+-- ========================================
 CREATE TABLE IF NOT EXISTS pending_payments (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
@@ -59,11 +47,31 @@ CREATE TABLE IF NOT EXISTS pending_payments (
   created_at timestamptz DEFAULT now()
 );
 
--- Enable RLS
+-- ========================================
+-- Enable Row Level Security (RLS)
+-- ========================================
 ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pending_payments ENABLE ROW LEVEL SECURITY;
 
+-- ========================================
+-- Drop existing policies to avoid conflicts
+-- ========================================
 -- Transactions policies
+DROP POLICY IF EXISTS "Users can view own transactions" ON transactions;
+DROP POLICY IF EXISTS "Users can insert own transactions" ON transactions;
+DROP POLICY IF EXISTS "Users can update own transactions" ON transactions;
+DROP POLICY IF EXISTS "Users can delete own transactions" ON transactions;
+
+-- Pending payments policies
+DROP POLICY IF EXISTS "Users can view own pending payments" ON pending_payments;
+DROP POLICY IF EXISTS "Users can insert own pending payments" ON pending_payments;
+DROP POLICY IF EXISTS "Users can update own pending payments" ON pending_payments;
+DROP POLICY IF EXISTS "Users can delete own pending payments" ON pending_payments;
+
+-- ========================================
+-- Create policies (recreated cleanly)
+-- ========================================
+-- Transactions
 CREATE POLICY "Users can view own transactions"
   ON transactions FOR SELECT
   TO authenticated
@@ -85,7 +93,7 @@ CREATE POLICY "Users can delete own transactions"
   TO authenticated
   USING (auth.uid() = user_id);
 
--- Pending payments policies
+-- Pending Payments
 CREATE POLICY "Users can view own pending payments"
   ON pending_payments FOR SELECT
   TO authenticated
@@ -107,8 +115,15 @@ CREATE POLICY "Users can delete own pending payments"
   TO authenticated
   USING (auth.uid() = user_id);
 
--- Create indexes for better performance
-CREATE INDEX IF NOT EXISTS idx_transactions_user_id ON transactions(user_id);
-CREATE INDEX IF NOT EXISTS idx_transactions_created_at ON transactions(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_pending_payments_user_id ON pending_payments(user_id);
-CREATE INDEX IF NOT EXISTS idx_pending_payments_due_date ON pending_payments(due_date);
+-- ========================================
+-- Indexes for better query performance
+-- ========================================
+DROP INDEX IF EXISTS idx_transactions_user_id;
+DROP INDEX IF EXISTS idx_transactions_created_at;
+DROP INDEX IF EXISTS idx_pending_payments_user_id;
+DROP INDEX IF EXISTS idx_pending_payments_due_date;
+
+CREATE INDEX idx_transactions_user_id ON transactions(user_id);
+CREATE INDEX idx_transactions_created_at ON transactions(created_at DESC);
+CREATE INDEX idx_pending_payments_user_id ON pending_payments(user_id);
+CREATE INDEX idx_pending_payments_due_date ON pending_payments(due_date);
